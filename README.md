@@ -60,6 +60,7 @@ interface Pool {
 - **`token`** — The pool's token contract address. This is the actual token associated with the pool (e.g. the LP token, vault receipt token, or staked asset address). Currently optional but will eventually be required for all adaptors.
 - **`searchTokenOverride`** — Used for LSTs (Liquid Staking Tokens), LRTs (Liquid Restaking Tokens), and similar derivative tokens where the pool's token address differs from the underlying token. When set, this address is used instead of the underlying token for search and display matching. Only set this if the default matching produces incorrect results.
 - **`isIntrinsicSource`** — Set to `true` only for LST, LRT, or yield-bearing stablecoin primitives whose APY should be used as intrinsic APY for downstream pools. Example: Lido stETH APY can be linked as intrinsic APY for an Aave stETH/wstETH market.
+  If an adapter lists multiple bridged versions with the same intrinsic APY, set this only on the canonical deployment.
 
 ```typescript
 {
