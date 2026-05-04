@@ -339,6 +339,10 @@ const excludeAdaptors = [
   'koalaswap',
   'seamless-v2',
   'mendi-finance',
+  'glyph',
+  'lore-finance',
+  'rho-markets',
+  'zklend',
 ];
 
 const excludePools = [
