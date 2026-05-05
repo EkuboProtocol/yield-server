@@ -256,19 +256,19 @@ async function dsr() {
     )
   );
   const tvlUsd = BigNumber(Pie).times(chi).div(1e18).div(RAY); // check against https://makerburn.com/#/
-  const apy =
+  const apyBase =
     (BigNumber(dsr).div(RAY).toNumber() ** (60 * 60 * 24 * 365) - 1) * 100;
 
   return {
     pool: '0x83F20F44975D03b1b09e64809B757c47f942BEeA',
     project: 'sky-lending',
-    symbol: 'DAI',
+    symbol: 'sDAI',
     chain: 'ethereum',
     token: '0x83F20F44975D03b1b09e64809B757c47f942BEeA',
-    poolMeta: 'DSR',
-    apy,
+    apyBase,
     tvlUsd: tvlUsd.toNumber(),
     underlyingTokens: [DAI],
+    isIntrinsicSource: true,
   };
 }
 
@@ -431,7 +431,7 @@ const susdsAPY = async () => {
     ).output / RAY;
 
   const nChi = Math.pow(ssr, secPerYear) * RAY;
-  const apy = (nChi / RAY - 1) * 100;
+  const apyBase = (nChi / RAY - 1) * 100;
 
   const configs = [
     {
@@ -468,16 +468,22 @@ const susdsAPY = async () => {
       const price = prices[key]?.price;
       if (!price) return null;
 
-      return {
+      const pool = {
         pool: sUSDS,
         symbol: 'SUSDS',
         project: 'sky-lending',
         chain,
         token: sUSDS,
         tvlUsd: totalSupply * price,
-        apy,
+        apyBase,
         underlyingTokens: [USDS],
       };
+
+      if (chain === 'ethereum') {
+        pool.isIntrinsicSource = true;
+      }
+
+      return pool;
     })
   );
 

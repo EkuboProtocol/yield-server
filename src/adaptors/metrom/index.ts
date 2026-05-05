@@ -1,6 +1,9 @@
 const { getData, formatChain, formatSymbol, keepFinite } = require('../utils');
 
 const PROJECT = 'metrom';
+const METROM_REWARDS_URL = 'https://app.metrom.xyz/en?type=rewards';
+const TURTLE_OPPORTUNITY_URL =
+  'https://gateway.turtle.xyz/turtle/opportunities';
 
 type ByChainTypeAndId<I> = Record<string, Record<number, I>>;
 
@@ -23,6 +26,7 @@ const CHAIN_TYPE_AND_NAMES: ByChainTypeAndId<string> = {
     9_745: 'Plasma',
     5_464: 'Saga',
     56: 'BSC',
+    747_474: 'Katana',
   },
   aptos: {
     1: 'Aptos',
@@ -39,6 +43,7 @@ interface Token {
 interface BaseTarget {
   chainType: string;
   chainId: number;
+  url?: string;
 }
 
 interface AmmPoolLiquidityTarget extends BaseTarget {
@@ -84,6 +89,24 @@ interface AaveV3NetSupplyTarget extends BaseAaveV3Target {
   type: 'aave-v3-net-supply';
 }
 
+interface Incentive {
+  name: string;
+  apr?: number;
+  yield?: number;
+  rewardTypeName?: string;
+}
+
+interface TurtleTarget extends BaseTarget {
+  type: 'turtle';
+  opportunityId: string;
+  name: string;
+  incentives?: Incentive[];
+}
+
+interface YieldSeekerTarget extends BaseTarget {
+  type: 'yield-seeker';
+}
+
 interface Reward extends Token {
   amount: string;
   remaining: string;
@@ -104,8 +127,10 @@ interface Campaign {
     | GmxV1LiquidityTarget
     | AaveV3SupplyTarget
     | AaveV3BorrowTarget
-    | AaveV3NetSupplyTarget;
-  rewards: Rewards;
+    | AaveV3NetSupplyTarget
+    | TurtleTarget
+    | YieldSeekerTarget;
+  rewards?: Rewards;
   usdTvl?: number;
   apr?: number;
 }
@@ -113,6 +138,15 @@ interface Campaign {
 interface CampaignsResponse {
   totalItems: number;
   campaigns: Campaign[];
+}
+
+interface TurtleOpportunity {
+  slug: string;
+  name: string;
+  url?: string;
+  baseTokens?: Token;
+  depositTokens?: Token[];
+  incentives?: Incentive[];
 }
 
 module.exports = {
@@ -137,15 +171,14 @@ module.exports = {
         if (
           !chain ||
           chainId !== campaign.target.chainId ||
-          !campaign.apr ||
-          !campaign.usdTvl ||
-          !campaign.rewards?.assets?.length
+          !Number.isFinite(campaign.apr) ||
+          !campaign.usdTvl
         )
           continue;
 
         let processedCampaign;
         try {
-          processedCampaign = processCampaign(campaign);
+          processedCampaign = await processCampaign(campaign);
         } catch (err) {
           console.error(
             `Could not process campaign with id ${campaign.id}: ${err}`
@@ -153,15 +186,17 @@ module.exports = {
           continue;
         }
 
+        if (!processedCampaign) continue;
+
         campaigns.push({
           ...processedCampaign,
           pool: campaign.id.toLowerCase(),
           chain: formatChain(chain),
           project: PROJECT,
-          apyReward: campaign.apr,
           tvlUsd: campaign.usdTvl,
-          rewardTokens: campaign.rewards.assets.map((reward) => reward.address),
-          url: `https://app.metrom.xyz/en/campaigns/${chainType}/${chainId}/${campaign.id}`,
+          ...getCampaignApyFields(campaign, processedCampaign),
+          url:
+            processedCampaign.url || campaign.target.url || METROM_REWARDS_URL,
         });
       }
 
@@ -177,9 +212,16 @@ module.exports = {
 interface ProcessedCampaign {
   symbol: string;
   underlyingTokens: string[];
+  url?: string;
+  apy?: number;
+  apyBase?: number;
+  apyReward?: number;
+  rewardTokens?: string[];
 }
 
-function processCampaign(campaign: Campaign): ProcessedCampaign | null {
+async function processCampaign(
+  campaign: Campaign
+): Promise<ProcessedCampaign | null> {
   switch (campaign.target.type) {
     case 'amm-pool-liquidity': {
       return {
@@ -209,8 +251,117 @@ function processCampaign(campaign: Campaign): ProcessedCampaign | null {
         underlyingTokens: [campaign.target.collateral.address],
       };
     }
+    case 'turtle': {
+      const opportunity = await getTurtleOpportunity(
+        campaign.target.opportunityId
+      );
+      const incentives =
+        opportunity?.incentives || campaign.target.incentives || [];
+
+      return {
+        symbol: formatSymbol(
+          (opportunity?.name || campaign.target.name).replace(/^Katana\s+/i, '')
+        ),
+        underlyingTokens: getTurtleUnderlyingTokens(opportunity),
+        url: opportunity?.url,
+        ...getTurtleApyFields(incentives, campaign.apr),
+      };
+    }
+    case 'yield-seeker': {
+      return {
+        symbol: formatSymbol(campaign.id),
+        underlyingTokens: [],
+      };
+    }
     default: {
       return null;
     }
   }
+}
+
+async function getTurtleOpportunity(
+  opportunityId: string
+): Promise<TurtleOpportunity | null> {
+  if (!opportunityId) return null;
+
+  try {
+    return (await getData(
+      `${TURTLE_OPPORTUNITY_URL}/${opportunityId}`
+    )) as TurtleOpportunity;
+  } catch (err) {
+    console.error(
+      `Could not fetch Turtle opportunity with id ${opportunityId}: ${err}`
+    );
+    return null;
+  }
+}
+
+function getTurtleUnderlyingTokens(opportunity?: TurtleOpportunity | null) {
+  const token = opportunity?.baseTokens || opportunity?.depositTokens?.[0];
+  if (!token?.address) return [];
+
+  return [token.address.toLowerCase()];
+}
+
+function getTurtleApyFields(incentives: Incentive[], totalApy?: number) {
+  const baseIncentives = incentives.filter(isBaseYieldIncentive);
+  const rewardIncentives = incentives.filter(
+    (incentive) => !isBaseYieldIncentive(incentive)
+  );
+  const apyBase = sumIncentives(baseIncentives);
+  const apyReward = sumIncentives(rewardIncentives);
+
+  if (!apyBase && !apyReward) return { apy: totalApy };
+
+  return {
+    ...(apyBase ? { apyBase } : {}),
+    ...(apyReward
+      ? {
+          apyReward,
+          rewardTokens: Array.from(
+            new Set(rewardIncentives.map(getRewardToken).filter(Boolean))
+          ),
+        }
+      : {}),
+  };
+}
+
+function isBaseYieldIncentive(incentive: Incentive) {
+  return ['native yield', 'lending yield'].includes(
+    incentive.name.toLowerCase()
+  );
+}
+
+function sumIncentives(incentives: Incentive[]) {
+  return incentives.reduce((sum, incentive) => {
+    const apy = incentive.apr ?? incentive.yield ?? 0;
+    return Number.isFinite(apy) ? sum + apy : sum;
+  }, 0);
+}
+
+function getRewardToken(incentive: Incentive) {
+  if (incentive.rewardTypeName) return incentive.rewardTypeName;
+
+  const token = incentive.name.match(/^[A-Z0-9]+/)?.[0];
+  return token || incentive.name;
+}
+
+function getCampaignApyFields(
+  campaign: Campaign,
+  processedCampaign: ProcessedCampaign
+) {
+  if (
+    Number.isFinite(processedCampaign.apy) ||
+    Number.isFinite(processedCampaign.apyBase) ||
+    Number.isFinite(processedCampaign.apyReward)
+  )
+    return {};
+
+  const rewards = campaign.rewards?.assets || [];
+  return rewards.length
+    ? {
+        apyReward: campaign.apr,
+        rewardTokens: rewards.map((reward) => reward.address),
+      }
+    : { apy: campaign.apr };
 }

@@ -38,10 +38,11 @@ const getFilecoinPool = async () => {
     project: 'glif',
     symbol: utils.formatSymbol('IFIL'),
     tvlUsd: tvlFIL * filPrice,
-    apy: Number(apyData.apy),
+    apyBase: Number(apyData.apy),
     poolMeta: 'GLIF',
     underlyingTokens: [WFIL],
     searchTokenOverride: '0xe764Acf02D8B7c21d2B6A8f0a96C78541e0DC3fd', // iFIL
+    isIntrinsicSource: true,
   };
 };
 

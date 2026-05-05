@@ -12,8 +12,8 @@ async function getTokenPrice(chain, token) {
 const rsETH = '0xA1290d69c65A6Fe4DF752f95823fae25cB99e5A7';
 const DEPOSIT_POOL = '0x036676389e48133B63a802f8635AD39E752D375D';
 const apy = async () => {
-  const apy = (await axios.get('https://universe.kelpdao.xyz/rseth/apy')).data
-    .value;
+  const apyBase = (await axios.get('https://universe.kelpdao.xyz/rseth/apy'))
+    .data.value;
   const config = (
     await sdk.api.abi.call({ abi: 'address:lrtConfig', target: DEPOSIT_POOL })
   ).output;
@@ -56,8 +56,10 @@ const apy = async () => {
       symbol: 'rsETH',
       underlyingTokens: tokens,
       tvlUsd,
-      apy,
+      apyBase,
       url: 'https://kelpdao.xyz/restake/',
+      searchTokenOverride: rsETH,
+      isIntrinsicSource: true,
     },
   ];
 };
