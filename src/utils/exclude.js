@@ -344,6 +344,7 @@ const excludeAdaptors = [
   'rho-markets',
   'zklend',
   'joe-lend',
+  'zyberswap-amm',
 ];
 
 const excludePools = [
